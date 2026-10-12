@@ -1,78 +1,47 @@
 package co.zeal.marketplace.project;
 
-import jakarta.servlet.http.HttpServletRequest;
-import org.springframework.data.redis.core.RedisTemplate;
+import co.zeal.marketplace.shared.security.AuthenticatedUser;
+import co.zeal.marketplace.shared.security.CurrentUser;
 import org.springframework.http.HttpStatus;
-import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.bind.annotation.*;
-import org.springframework.web.server.ResponseStatusException;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
-import java.util.Map;
 
 @RestController
-@RequestMapping("/api/marketplace/proyectos")
+@PreAuthorize("hasRole('EMPLEADO')")
 public class ProjectController {
 
-    private final ProjectRepository projectRepository;
-    private final RedisTemplate<String, Object> redisTemplate;
+    private final ProjectService projectService;
 
-    public ProjectController(ProjectRepository projectRepository, RedisTemplate<String, Object> redisTemplate) {
-        this.projectRepository = projectRepository;
-        this.redisTemplate = redisTemplate;
+    public ProjectController(ProjectService projectService) {
+        this.projectService = projectService;
     }
 
-    @GetMapping
-    public List<Project> list() { return projectRepository.findAll(); }
-
-    @GetMapping("/{id}")
-    public Project getOne(@PathVariable Long id) {
-        return projectRepository.findById(id)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
+    @GetMapping("/api/proyectos")
+    public List<ProjectView> catalog(@CurrentUser AuthenticatedUser user) {
+        return projectService.catalog(user);
     }
 
-    @PostMapping
-    @ResponseStatus(HttpStatus.CREATED)
-    public Project create(@RequestBody ProjectRequest body, HttpServletRequest req) {
-        String role = (String) req.getAttribute("userRole");
-        if (!"ADMIN".equals(role)) {
-            throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Solo administradores pueden crear proyectos.");
-        }
-        Project project = Project.builder()
-                .title(body.title())
-                .description(body.description())
-                .capacity(body.capacity())
-                .enrolled(0)
-                .organizationId((String) req.getAttribute("userId"))
-                .build();
-        projectRepository.save(project);
-        redisTemplate.convertAndSend("events.projects", Map.of(
-                "type", "PROYECTO_PUBLICADO",
-                "project", Map.of("id", project.getId(), "title", project.getTitle(),
-                        "capacity", project.getCapacity(), "enrolled", project.getEnrolled())
-        ));
-        return project;
+    @GetMapping("/api/proyectos/{id}")
+    public ProjectDetailView detail(@CurrentUser AuthenticatedUser user, @PathVariable String id) {
+        return projectService.detail(user, id);
     }
 
-    /** HU-17 / RETO C-1: 0% overbooking con SELECT FOR UPDATE */
-    @Transactional
-    @PostMapping("/{id}/postulaciones")
-    @ResponseStatus(HttpStatus.CREATED)
-    public ApplicationResult apply(@PathVariable Long id, HttpServletRequest req) {
-        String userId = (String) req.getAttribute("userId");
-        Project project = projectRepository.findByIdWithLock(id)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
-        if (project.getEnrolled() >= project.getCapacity()) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT, "Cupos agotados.");
-        }
-        project.setEnrolled(project.getEnrolled() + 1);
-        projectRepository.save(project);
-        int remaining = project.getCapacity() - project.getEnrolled();
-        redisTemplate.convertAndSend("events.projects.capacity",
-                Map.of("projectId", id, "remainingSlots", remaining));
-        return new ApplicationResult(id, userId, "ACEPTADO", remaining);
+    /** 201 con la postulación nueva (ACEPTADA o EN_ESPERA); 200 si ya existía. */
+    @PostMapping("/api/proyectos/{id}/postulaciones")
+    public ResponseEntity<ApplicationView> apply(@CurrentUser AuthenticatedUser user, @PathVariable String id) {
+        ApplicationOutcome outcome = projectService.apply(user, id);
+        return ResponseEntity.status(outcome.created() ? HttpStatus.CREATED : HttpStatus.OK)
+                .body(outcome.application());
     }
 
-    public record ProjectRequest(String title, String description, Integer capacity) {}
-    public record ApplicationResult(Long projectId, String userId, String status, int remainingSlots) {}
+    @GetMapping("/api/postulaciones/mias")
+    public List<ApplicationView> myApplications(@CurrentUser AuthenticatedUser user) {
+        return projectService.myApplications(user);
+    }
 }
