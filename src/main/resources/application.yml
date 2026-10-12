@@ -57,6 +57,14 @@ app:
       issuer: ${JWT_ISSUER:zeal}
   demo-data:
     enabled: ${DEMO_DATA_ENABLED:true}
+  workshop-room:
+    opens-before-start: 10m
+  # Servidor de medios (SFU) de las videollamadas grupales de los talleres.
+  livekit:
+    # URL con la que el navegador se conecta. Una ruta relativa ("/livekit") usa el mismo origen.
+    public-url: ${LIVEKIT_PUBLIC_URL:/livekit}
+    api-key: ${LIVEKIT_API_KEY:zeal-dev}
+    api-secret: ${LIVEKIT_API_SECRET:ZealLiveKitDevSecretKeyMinimum32Chars!!}
 
 logging:
   level:
