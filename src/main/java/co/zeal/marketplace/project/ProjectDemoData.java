@@ -75,9 +75,10 @@ class ProjectDemoData implements ApplicationRunner {
                                 List.of("Esta convocatoria existe para demostrar que, con 500 postulaciones simultáneas, se asignan exactamente 10 cupos."),
                                 List.of(), List.of(), 10, now, 30)),
                 seed("proyecto-otra-empresa", OTHER, now, 1, 0,
-                        draft("Proyecto de otra empresa", "Ventas", "Semilla 2026-2",
-                                "Este proyecto pertenece a otra organización y nunca debe verse aquí.",
-                                List.of("Solo lo ven las personas de esa empresa."), List.of(), List.of(), 2, now, 7)));
+                        draft("Rediseño del onboarding comercial", "Ventas", "Semilla 2026-2",
+                                "Convocatoria de Órbita Labs para mejorar la llegada de clientes nuevos.",
+                                List.of("Convocatoria interna de Órbita Labs: Nexura nunca la ve."), List.of(),
+                                List.of(), 2, now, 7)));
         projects.saveAll(seeds);
         log.info("[demo] Sembradas {} convocatorias de demostración.", seeds.size());
     }
