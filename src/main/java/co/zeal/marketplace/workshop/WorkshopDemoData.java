@@ -61,8 +61,9 @@ class WorkshopDemoData implements ApplicationRunner {
                 seed("taller-primeros-auxilios", NEXURA, now, 9, 5, "Primeros auxilios psicológicos para equipos",
                         "Qué hacer, y qué no, cuando alguien de tu equipo está pasando un mal momento.",
                         dayAt(8, 15), 90, 20),
-                seed("taller-otra-empresa", OTHER, now, 1, 0, "Taller de otra empresa",
-                        "Pertenece a otra organización y nunca debe verse aquí.", dayAt(2, 10), 60, 10));
+                seed("taller-otra-empresa", OTHER, now, 1, 0, "Foco y energía en jornadas remotas",
+                        "Taller de Órbita Labs: rutinas para trabajar desde casa sin agotarse. Nexura nunca lo ve.",
+                        dayAt(2, 10), 60, 10));
         workshops.saveAll(seeds);
         log.info("[demo] Sembrados {} talleres de demostración.", seeds.size());
     }
