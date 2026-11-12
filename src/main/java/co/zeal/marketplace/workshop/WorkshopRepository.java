@@ -12,6 +12,9 @@ import java.util.Optional;
 
 public interface WorkshopRepository extends JpaRepository<Workshop, String> {
 
+    /** R2-8: el taller solo si es de la empresa de quien pregunta (filtro en la consulta, SEG-3). */
+    Optional<Workshop> findByIdAndOrganization(String id, String organization);
+
     /** Reto C-1 en talleres: SELECT ... FOR UPDATE serializa las inscripciones concurrentes. */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT w FROM Workshop w WHERE w.id = :id AND w.organization = :organization")

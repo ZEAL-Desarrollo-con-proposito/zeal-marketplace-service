@@ -42,20 +42,18 @@ public class Application {
         // JPA
     }
 
-    static Application accepted(Project project, String userId, Instant now) {
-        project.takeSpot();
-        return create(project, userId, ApplicationStatus.ACEPTADA, null, now);
+    /** La postulación que corresponde a un cupo o puesto ya reclamado de forma atómica ({@link SpotClaims}). */
+    static Application claimed(String projectId, String userId, SpotClaims.Claim claim, Instant now) {
+        return claim.accepted()
+                ? create(projectId, userId, ApplicationStatus.ACEPTADA, null, now)
+                : create(projectId, userId, ApplicationStatus.EN_ESPERA, claim.waitlistPosition(), now);
     }
 
-    static Application waitlisted(Project project, String userId, int position, Instant now) {
-        return create(project, userId, ApplicationStatus.EN_ESPERA, position, now);
-    }
-
-    private static Application create(Project project, String userId, ApplicationStatus status, Integer position,
+    private static Application create(String projectId, String userId, ApplicationStatus status, Integer position,
                                       Instant now) {
         Application application = new Application();
         application.id = Ids.next("postulacion");
-        application.projectId = project.getId();
+        application.projectId = projectId;
         application.userId = userId;
         application.status = status;
         application.waitlistPosition = position;

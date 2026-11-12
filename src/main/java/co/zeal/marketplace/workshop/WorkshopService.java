@@ -1,5 +1,8 @@
 package co.zeal.marketplace.workshop;
 
+import co.zeal.marketplace.shared.cache.CacheConfig;
+import org.springframework.cache.annotation.Cacheable;
+
 import co.zeal.marketplace.shared.error.BusinessConflictException;
 import co.zeal.marketplace.shared.error.ResourceNotFoundException;
 import co.zeal.marketplace.shared.security.AuthenticatedUser;
@@ -32,7 +35,9 @@ public class WorkshopService {
         this.clock = clock;
     }
 
+    /** Catálogo de la empresa, en caché Redis por empresa (R2-26); se invalida al publicar o al cambiar cupos. */
     @Transactional(readOnly = true)
+    @Cacheable(cacheNames = CacheConfig.CACHE, key = "#employee.organization()")
     public List<WorkshopView> upcoming(AuthenticatedUser employee) {
         return workshops.findUpcoming(employee.organization(), Instant.now(clock)).stream()
                 .map(WorkshopView::of)

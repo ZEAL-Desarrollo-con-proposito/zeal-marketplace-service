@@ -3,6 +3,7 @@ package co.zeal.marketplace.workshop;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
+import co.zeal.marketplace.shared.cluster.ClusterLock;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
@@ -27,17 +28,20 @@ class WorkshopDemoData implements ApplicationRunner {
 
     private final WorkshopRepository workshops;
     private final Clock clock;
+    private final ClusterLock clusterLock;
     private final ZoneId zone;
 
-    WorkshopDemoData(WorkshopRepository workshops, Clock clock, ZoneId businessZone) {
+    WorkshopDemoData(WorkshopRepository workshops, Clock clock, ClusterLock clusterLock, ZoneId businessZone) {
         this.workshops = workshops;
         this.clock = clock;
+        this.clusterLock = clusterLock;
         this.zone = businessZone;
     }
 
     @Override
     @Transactional
     public void run(ApplicationArguments args) {
+        clusterLock.acquireForTransaction("demo-data:workshops"); // Réplicas que arrancan a la vez: siembra una.
         if (workshops.count() > 0) {
             return;
         }

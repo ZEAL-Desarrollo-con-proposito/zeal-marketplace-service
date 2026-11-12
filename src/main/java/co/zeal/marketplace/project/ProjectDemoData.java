@@ -3,6 +3,7 @@ package co.zeal.marketplace.project;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
+import co.zeal.marketplace.shared.cluster.ClusterLock;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
@@ -27,15 +28,18 @@ class ProjectDemoData implements ApplicationRunner {
 
     private final ProjectRepository projects;
     private final Clock clock;
+    private final ClusterLock clusterLock;
 
-    ProjectDemoData(ProjectRepository projects, Clock clock) {
+    ProjectDemoData(ProjectRepository projects, Clock clock, ClusterLock clusterLock) {
         this.projects = projects;
         this.clock = clock;
+        this.clusterLock = clusterLock;
     }
 
     @Override
     @Transactional
     public void run(ApplicationArguments args) {
+        clusterLock.acquireForTransaction("demo-data:projects"); // Réplicas que arrancan a la vez: siembra una.
         if (projects.count() > 0) {
             return;
         }

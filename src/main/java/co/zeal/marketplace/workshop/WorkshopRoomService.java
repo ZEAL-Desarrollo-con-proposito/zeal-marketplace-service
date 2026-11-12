@@ -37,8 +37,7 @@ public class WorkshopRoomService {
 
     @Transactional(readOnly = true)
     public WorkshopRoomView roomFor(AuthenticatedUser user, String workshopId) {
-        Workshop workshop = workshops.findById(workshopId)
-                .filter(found -> found.getOrganization().equals(user.organization()))
+        Workshop workshop = workshops.findByIdAndOrganization(workshopId, user.organization())
                 .orElseThrow(() -> new ResourceNotFoundException(NOT_FOUND));
         WorkshopRoomView.Role role = roleOf(user, workshop);
         Instant now = Instant.now(clock);
