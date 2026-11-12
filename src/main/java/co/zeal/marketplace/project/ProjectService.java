@@ -4,6 +4,8 @@ import co.zeal.marketplace.shared.error.BusinessConflictException;
 import co.zeal.marketplace.shared.error.ResourceNotFoundException;
 import co.zeal.marketplace.shared.security.AuthenticatedUser;
 import org.springframework.context.ApplicationEventPublisher;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -30,11 +32,14 @@ public class ProjectService {
     private final Clock clock;
     private final SpotClaims claims;
     private final TransactionTemplate transactions;
+    private final Timer saveTimer;
 
     public ProjectService(ProjectRepository projects, ApplicationRepository applications,
                           ApplicationEventPublisher events, Clock clock, SpotClaims claims,
-                          PlatformTransactionManager transactionManager) {
+                          PlatformTransactionManager transactionManager, MeterRegistry meters) {
         this.claims = claims;
+        // REND-2: cuánto tarda guardar la postulación ya con el cupo reclamado (conexión + insert + commit + eventos).
+        this.saveTimer = Timer.builder("zeal.marketplace.application.save").publishPercentileHistogram().register(meters);
         this.transactions = new TransactionTemplate(transactionManager);
         this.projects = projects;
         this.applications = applications;
@@ -71,7 +76,7 @@ public class ProjectService {
             return new BusinessConflictException("Esta convocatoria ya cerró.");
         });
         try {
-            return transactions.execute(status -> {
+            return saveTimer.record(() -> transactions.execute(status -> {
                 Project project = project(employee, projectId);
                 Application application = applications.saveAndFlush(
                         Application.claimed(projectId, employee.id(), claim, now));
@@ -82,7 +87,7 @@ public class ProjectService {
                 }
                 events.publishEvent(new ProjectEvents.ApplicationSubmitted(employee.id(), view));
                 return new ApplicationOutcome(view, true);
-            });
+            }));
         } catch (DataIntegrityViolationException duplicate) {
             // Doble envío simultáneo de la misma persona: la otra petición ya guardó su postulación.
             if (claim.accepted()) {
