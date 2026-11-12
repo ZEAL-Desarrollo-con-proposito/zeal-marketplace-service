@@ -84,7 +84,7 @@ class WorkshopRoomIT extends IntegrationTest {
         mvc.perform(get("/api/talleres/" + id + "/sala").with(user("usr-admin-otra", "ADMIN", "Órbita Labs S.A.S.")))
                 .andExpect(status().isNotFound());
         mvc.perform(get("/api/talleres/" + id + "/sala").with(user("usr-psicologo-001", "PSICOLOGO", "ZEAL")))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isNotFound()); // SEG-3
     }
 
     private String publish(Instant startsAt) throws Exception {

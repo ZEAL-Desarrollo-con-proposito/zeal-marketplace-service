@@ -28,8 +28,8 @@ class MarketplaceApiIT extends IntegrationTest {
     @Test
     void employeesCannotPublish() throws Exception {
         mvc.perform(get("/api/admin/proyectos").with(user("usr-empleado-001", "EMPLEADO", "Nexura S.A.S.")))
-                .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.message", is("No tienes permiso para esta operación.")));
+                .andExpect(status().isNotFound()) // SEG-3: 404 en lugar de 403
+                .andExpect(jsonPath("$.message", is("El recurso solicitado no existe.")));
     }
 
     @Test

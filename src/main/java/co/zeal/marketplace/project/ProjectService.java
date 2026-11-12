@@ -4,7 +4,10 @@ import co.zeal.marketplace.shared.error.BusinessConflictException;
 import co.zeal.marketplace.shared.error.ResourceNotFoundException;
 import co.zeal.marketplace.shared.security.AuthenticatedUser;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
@@ -25,9 +28,14 @@ public class ProjectService {
     private final ApplicationRepository applications;
     private final ApplicationEventPublisher events;
     private final Clock clock;
+    private final SpotClaims claims;
+    private final TransactionTemplate transactions;
 
     public ProjectService(ProjectRepository projects, ApplicationRepository applications,
-                          ApplicationEventPublisher events, Clock clock) {
+                          ApplicationEventPublisher events, Clock clock, SpotClaims claims,
+                          PlatformTransactionManager transactionManager) {
+        this.claims = claims;
+        this.transactions = new TransactionTemplate(transactionManager);
         this.projects = projects;
         this.applications = applications;
         this.events = events;
@@ -48,33 +56,46 @@ public class ProjectService {
     }
 
     /**
-     * Reto C-1 (cero sobreasignación): con la fila bloqueada se revisa el cupo y se asigna en la
-     * misma transacción. Quien llega sin cupo entra a la lista de espera con su puesto. Es
-     * idempotente: repetir la postulación devuelve la misma.
+     * Reto C-1 (cero sobreasignación) y REND-2: el cupo o el puesto en la lista de espera se reclama con
+     * una sentencia atómica ({@link SpotClaims}); después se guarda la postulación. Es idempotente:
+     * repetir la postulación devuelve la misma.
      */
-    @Transactional
     public ApplicationOutcome apply(AuthenticatedUser employee, String projectId) {
         Instant now = Instant.now(clock);
-        Project project = projects.findForUpdate(projectId, employee.organization())
-                .orElseThrow(() -> new ResourceNotFoundException(NOT_FOUND));
-        var existing = applications.findByProjectIdAndUserId(project.getId(), employee.id());
+        var existing = applications.findByProjectIdAndUserId(projectId, employee.id());
         if (existing.isPresent()) {
-            return new ApplicationOutcome(ApplicationView.of(existing.get(), project), false);
+            return new ApplicationOutcome(ApplicationView.of(existing.get(), project(employee, projectId)), false);
         }
-        if (!project.isOpenAt(now)) {
-            throw new BusinessConflictException("Esta convocatoria ya cerró.");
+        SpotClaims.Claim claim = claims.claim(projectId, employee.organization(), now).orElseThrow(() -> {
+            project(employee, projectId); // 404 si no existe para esta empresa
+            return new BusinessConflictException("Esta convocatoria ya cerró.");
+        });
+        try {
+            return transactions.execute(status -> {
+                Project project = project(employee, projectId);
+                Application application = applications.saveAndFlush(
+                        Application.claimed(projectId, employee.id(), claim, now));
+                ApplicationView view = ApplicationView.of(application, project);
+                if (claim.accepted()) {
+                    events.publishEvent(new ProjectEvents.ProjectSpotsChanged(projectId, claim.capacity(),
+                            claim.occupied(), claim.version()));
+                }
+                events.publishEvent(new ProjectEvents.ApplicationSubmitted(employee.id(), view));
+                return new ApplicationOutcome(view, true);
+            });
+        } catch (DataIntegrityViolationException duplicate) {
+            // Doble envío simultáneo de la misma persona: la otra petición ya guardó su postulación.
+            if (claim.accepted()) {
+                claims.release(projectId);
+            }
+            Application stored = applications.findByProjectIdAndUserId(projectId, employee.id()).orElseThrow(() -> duplicate);
+            return new ApplicationOutcome(ApplicationView.of(stored, project(employee, projectId)), false);
         }
-        Application application = project.hasFreeSpot()
-                ? Application.accepted(project, employee.id(), now)
-                : Application.waitlisted(project, employee.id(), waitlistLength(project) + 1, now);
-        applications.save(application);
-        applications.flush(); // Materializa las versiones que viajan en la respuesta y en los eventos.
-        ApplicationView view = ApplicationView.of(application, project);
-        if (application.isAccepted()) {
-            events.publishEvent(ProjectEvents.ProjectSpotsChanged.of(project));
-        }
-        events.publishEvent(new ProjectEvents.ApplicationSubmitted(employee.id(), view));
-        return new ApplicationOutcome(view, true);
+    }
+
+    private Project project(AuthenticatedUser employee, String projectId) {
+        return projects.findByIdAndOrganization(projectId, employee.organization())
+                .orElseThrow(() -> new ResourceNotFoundException(NOT_FOUND));
     }
 
     @Transactional(readOnly = true)
@@ -88,9 +109,5 @@ public class ProjectService {
                 .map(application -> ApplicationView.of(application, byId.get(application.getProjectId())))
                 .sorted(Comparator.comparing(ApplicationView::createdAt).reversed())
                 .toList();
-    }
-
-    private int waitlistLength(Project project) {
-        return Math.toIntExact(applications.countByProjectIdAndStatus(project.getId(), ApplicationStatus.EN_ESPERA));
     }
 }

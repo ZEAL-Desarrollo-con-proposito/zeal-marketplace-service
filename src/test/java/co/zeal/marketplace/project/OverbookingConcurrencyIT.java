@@ -67,4 +67,22 @@ class OverbookingConcurrencyIT extends IntegrationTest {
         assertThat(second.application().id()).isEqualTo(first.application().id());
         assertThat(projects.findById(project.id()).orElseThrow().getOccupied()).isEqualTo(1);
     }
+
+    /** Doble clic desde dos pestañas a la vez: una sola postulación y un solo cupo ocupado (compensación). */
+    @Test
+    void simultaneousDuplicateSubmissionsTakeASingleSpot() throws Exception {
+        AdminProjectView project = adminProjectService.publish(Users.admin(Users.NEXURA), new NewProjectRequest(
+                "Proyecto doble envío " + System.nanoTime(), "Producto", "Pruebas", "Diez pestañas, una persona.",
+                List.of("Convocatoria creada por la prueba de doble envío."), List.of(), List.of(), 5,
+                Instant.now().plus(Duration.ofDays(3))));
+
+        List<Concurrently.Outcome<ApplicationOutcome>> outcomes = Concurrently.run(10,
+                i -> projectService.apply(Users.employee("doble-clic"), project.id()));
+
+        assertThat(outcomes).allMatch(Concurrently.Outcome::succeeded);
+        assertThat(outcomes).filteredOn(outcome -> outcome.value().created()).hasSize(1);
+        assertThat(outcomes).extracting(outcome -> outcome.value().application().id()).containsOnly(
+                outcomes.getFirst().value().application().id());
+        assertThat(projects.findById(project.id()).orElseThrow().getOccupied()).isEqualTo(1);
+    }
 }

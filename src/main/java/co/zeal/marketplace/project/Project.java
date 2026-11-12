@@ -6,6 +6,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import jakarta.persistence.Version;
+import org.hibernate.annotations.OptimisticLock;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
@@ -57,6 +58,14 @@ public class Project {
     @Column(nullable = false)
     private int occupied;
 
+    /**
+     * Personas en lista de espera (R2-27): la siguiente posición sale de este contador, que actualiza de
+     * forma atómica {@link SpotClaims}. No mueve {@code version} (contrato: la versión sube solo cuando
+     * cambian los cupos ocupados).
+     */
+    @OptimisticLock(excluded = true)
+    private int waitlisted;
+
     @Column(name = "closes_at", nullable = false)
     private Instant closesAt;
 
@@ -104,13 +113,6 @@ public class Project {
         return occupied < capacity;
     }
 
-    /** Solo se invoca con la fila bloqueada: así dos personas nunca reciben el mismo cupo. */
-    public void takeSpot() {
-        if (!hasFreeSpot()) {
-            throw new IllegalStateException("La convocatoria " + id + " no tiene cupos");
-        }
-        occupied++;
-    }
 
     public boolean belongsTo(String organization) {
         return this.organization.equals(organization);
