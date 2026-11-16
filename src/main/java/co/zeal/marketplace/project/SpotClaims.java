@@ -204,4 +204,29 @@ public class SpotClaims {
                 "UPDATE projects SET occupied = occupied - 1, version = version + 1 WHERE id = ? AND occupied > 0",
                 projectId));
     }
+
+    /** Compensación: quita de la cuenta de la lista de espera un puesto que no llegó a guardarse. */
+    public void releaseWaitlist(String projectId) {
+        shortTransaction.executeWithoutResult(status -> jdbc.update(
+                "UPDATE projects SET waitlisted = waitlisted - 1 WHERE id = ? AND waitlisted > 0", projectId));
+    }
+
+    /**
+     * Doble envío entre réplicas: la postulación que se guardó primero quedó en la lista de espera, pero la otra
+     * petición de la misma persona había reclamado un cupo. En vez de devolverlo, se lo pasa a la postulación
+     * guardada (sigue ocupado exactamente un cupo) y esa postulación deja la lista de espera.
+     */
+    public void promoteStoredToAccepted(String applicationId, String projectId) {
+        shortTransaction.executeWithoutResult(status -> {
+            int promoted = jdbc.update("UPDATE applications SET status = 'ACEPTADA', waitlist_position = NULL, "
+                    + "version = version + 1 WHERE id = ? AND status = 'EN_ESPERA'", applicationId);
+            if (promoted == 0) {
+                // Ya estaba aceptada (otra compensación): el cupo reclamado sobra.
+                jdbc.update("UPDATE projects SET occupied = occupied - 1, version = version + 1 "
+                        + "WHERE id = ? AND occupied > 0", projectId);
+            } else {
+                jdbc.update("UPDATE projects SET waitlisted = waitlisted - 1 WHERE id = ? AND waitlisted > 0", projectId);
+            }
+        });
+    }
 }
