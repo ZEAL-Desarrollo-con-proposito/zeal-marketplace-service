@@ -92,6 +92,14 @@ public class ProjectService {
         if (existing.isPresent()) {
             return new ApplicationOutcome(ApplicationView.of(existing.get(), project(employee, projectId)), false);
         }
+        return claimAndStore(employee, projectId, now);
+    }
+
+    /**
+     * Reclama el cupo y guarda la postulación. Separado de la comprobación inicial para poder ejercitar, en las pruebas,
+     * la carrera de dos réplicas que pasan esa comprobación a la vez.
+     */
+    ApplicationOutcome claimAndStore(AuthenticatedUser employee, String projectId, Instant now) {
         SpotClaims.Claim claim = claims.claim(projectId, employee.organization(), now).orElseThrow(() -> {
             project(employee, projectId); // 404 si no existe para esta empresa
             return new BusinessConflictException("Esta convocatoria ya cerró.");
