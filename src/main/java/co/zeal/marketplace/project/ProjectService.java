@@ -16,6 +16,8 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
+import java.util.concurrent.locks.ReentrantLock;
+import java.util.stream.IntStream;
 import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -65,12 +67,39 @@ public class ProjectService {
      * una sentencia atómica ({@link SpotClaims}); después se guarda la postulación. Es idempotente:
      * repetir la postulación devuelve la misma.
      */
+    /**
+     * Dobles envíos de la MISMA persona a la MISMA convocatoria en esta réplica se atienden de a uno: el segundo ve la
+     * postulación ya guardada y no reclama otro cupo. Entre réplicas, la restricción única de la base y la
+     * compensación de {@link #applyOnce} siguen siendo la red de seguridad.
+     */
+    private static final int PERSON_LOCKS = 256;
+    private final ReentrantLock[] personLocks = IntStream.range(0, PERSON_LOCKS)
+            .mapToObj(i -> new ReentrantLock()).toArray(ReentrantLock[]::new);
+
     public ApplicationOutcome apply(AuthenticatedUser employee, String projectId) {
+        ReentrantLock lock = personLocks[Math.floorMod((projectId + '|' + employee.id()).hashCode(), PERSON_LOCKS)];
+        lock.lock();
+        try {
+            return applyOnce(employee, projectId);
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    private ApplicationOutcome applyOnce(AuthenticatedUser employee, String projectId) {
         Instant now = Instant.now(clock);
         var existing = applications.findByProjectIdAndUserId(projectId, employee.id());
         if (existing.isPresent()) {
             return new ApplicationOutcome(ApplicationView.of(existing.get(), project(employee, projectId)), false);
         }
+        return claimAndStore(employee, projectId, now);
+    }
+
+    /**
+     * Reclama el cupo y guarda la postulación. Separado de la comprobación inicial para poder ejercitar, en las pruebas,
+     * la carrera de dos réplicas que pasan esa comprobación a la vez.
+     */
+    ApplicationOutcome claimAndStore(AuthenticatedUser employee, String projectId, Instant now) {
         SpotClaims.Claim claim = claims.claim(projectId, employee.organization(), now).orElseThrow(() -> {
             project(employee, projectId); // 404 si no existe para esta empresa
             return new BusinessConflictException("Esta convocatoria ya cerró.");
@@ -89,11 +118,18 @@ public class ProjectService {
                 return new ApplicationOutcome(view, true);
             }));
         } catch (DataIntegrityViolationException duplicate) {
-            // Doble envío simultáneo de la misma persona: la otra petición ya guardó su postulación.
-            if (claim.accepted()) {
-                claims.release(projectId);
-            }
+            // Doble envío simultáneo desde otra réplica: la otra petición de la misma persona ya guardó su postulación.
             Application stored = applications.findByProjectIdAndUserId(projectId, employee.id()).orElseThrow(() -> duplicate);
+            if (claim.accepted()) {
+                if (stored.getStatus() == ApplicationStatus.ACEPTADA) {
+                    claims.release(projectId);
+                } else {
+                    claims.promoteStoredToAccepted(stored.getId(), projectId);
+                    stored = applications.findByProjectIdAndUserId(projectId, employee.id()).orElseThrow(() -> duplicate);
+                }
+            } else {
+                claims.releaseWaitlist(projectId);
+            }
             return new ApplicationOutcome(ApplicationView.of(stored, project(employee, projectId)), false);
         }
     }
